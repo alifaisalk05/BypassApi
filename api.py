@@ -34,43 +34,36 @@ async def process_link(link: str):
         raise HTTPException(status_code=500, detail="Telegram credentials missing in environment variables.")
     
     try:
-        # 1. Send the link and save OUR message ID to track the specific reply
+        # 1. Send the link and save OUR message ID
         sent_msg = await client.send_message(BOT_USERNAME, link)
         
-        # 2. Poll the chat, waiting for the bot to reply and finish editing
-        # Increased to 60 seconds because your example showed a 28.6s bypass time
+        # 2. Poll for the reply
         for _ in range(60):
             await asyncio.sleep(1)
             
-            # Check the last 30 messages in the chat
-            async for msg in client.iter_messages(BOT_USERNAME, limit=30):
-                
-                # Check if this message is a reply to OUR specific link
+            # Check recent messages to find the bot's reply to our specific message
+            async for msg in client.iter_messages(BOT_USERNAME, limit=10):
                 if msg.reply_to_msg_id == sent_msg.id:
                     text = msg.text or ""
                     
-                    # 3. Check if the bot has finished editing (looking for the footer)
-                    # We also check for common error words just in case the bot fails
-                    if "CC : @DDxBypass_Bot" in text or "error" in text.lower() or "failed" in text.lower():
+                    # 3. Look for "Bypassed" followed by a URL on the same line.
+                    # (?i) makes it case-insensitive so it catches "Bypassed", "bypassed", etc.
+                    # [^\n]* allows any characters (like ➙, -, or spaces) before the http link
+                    bypassed_links = re.findall(r'(?i)bypassed[^\n]*(https?://[^\s]+)', text)
+                    
+                    if bypassed_links:
+                        # As soon as we see a bypassed link, we return it instantly.
+                        return {
+                            "status": "success",
+                            "final_link": bypassed_links[-1], # Grabs the last link in the chain
+                            "all_links": bypassed_links       # In case it's a multi-step bypass
+                        }
                         
-                        # 4. Extract ONLY the bypassed URLs using Regex
-                        bypassed_links = re.findall(r'▸ Bypassed ➙\s*(https?://[^\s]+)', text)
-                        
-                        if bypassed_links:
-                            return {
-                                "status": "success",
-                                # Often the last link in the chain is the one you actually want
-                                "final_link": bypassed_links[-1], 
-                                "all_links": bypassed_links # Includes intermediate links if there are multiple steps
-                            }
-                        else:
-                            return {
-                                "status": "failed",
-                                "message": "Bot finished but no bypassed link was found.",
-                                "raw_response": text
-                            }
-        
-        return {"status": "error", "message": "Timeout: Bot took longer than 60 seconds to finish."}
+                    # Catch obvious error messages from the bot so it doesn't hang for 60 seconds
+                    if "error" in text.lower() or "invalid link" in text.lower():
+                        return {"status": "error", "message": text}
+
+        return {"status": "error", "message": "Timeout: No bypassed link found within 60 seconds."}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
