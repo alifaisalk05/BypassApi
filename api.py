@@ -28,6 +28,19 @@ async def shutdown_event():
     if client:
         await client.disconnect()
 
+# --- NEW HEALTH CHECK ENDPOINT ---
+@app.get("/health")
+async def health_check():
+    is_connected = False
+    if client and client.is_connected():
+        is_connected = True
+        
+    return {
+        "status": "healthy",
+        "telegram_connected": is_connected
+    }
+# ---------------------------------
+
 @app.get("/")
 async def process_link(link: str):
     if not client:
@@ -47,19 +60,16 @@ async def process_link(link: str):
                     text = msg.text or ""
                     
                     # 3. Look for "Bypassed" followed by a URL on the same line.
-                    # (?i) makes it case-insensitive so it catches "Bypassed", "bypassed", etc.
-                    # [^\n]* allows any characters (like ➙, -, or spaces) before the http link
                     bypassed_links = re.findall(r'(?i)bypassed[^\n]*(https?://[^\s]+)', text)
                     
                     if bypassed_links:
-                        # As soon as we see a bypassed link, we return it instantly.
                         return {
                             "status": "success",
-                            "final_link": bypassed_links[-1], # Grabs the last link in the chain
-                            "all_links": bypassed_links       # In case it's a multi-step bypass
+                            "final_link": bypassed_links[-1], 
+                            "all_links": bypassed_links       
                         }
                         
-                    # Catch obvious error messages from the bot so it doesn't hang for 60 seconds
+                    # Catch obvious error messages from the bot
                     if "error" in text.lower() or "invalid link" in text.lower():
                         return {"status": "error", "message": text}
 
